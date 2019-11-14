@@ -1,0 +1,18 @@
+{
+    "xsappname": "sfsdkapp",
+    "tenant-mode": "shared",
+    "scopes": [
+        {
+            "name": "uaa.user",
+            "description": "Token Exchange"
+        }
+    ],
+    "role-templates": [
+        {
+            "name": "TOKEN_EXCHANGE",
+            "scope-references": [
+                "uaa.user"
+            ]
+        }
+    ]
+}

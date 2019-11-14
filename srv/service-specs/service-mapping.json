@@ -1,0 +1,7 @@
+{
+  "RCMCandidate": {
+    "directoryName": "sfo-data-service",
+    "servicePath": "/odata/v2",
+    "npmPackageName": "sfo-data-service"
+  }
+}

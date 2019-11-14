@@ -1,0 +1,264 @@
+srv/package.json
+----------------
+{
+	"engines": {
+		"node": ">=11.0.0"
+	},
+	"dependencies": {
+		"@sap/cloud-sdk-core": "^1.12.0",
+		"express": "^4.17.1"
+	},
+	"scripts": {
+		"start": "node server.js"
+	},
+	"devDependencies": {
+		"@sap/cloud-sdk-generator": "^1.12.0"
+	}
+}
+
+
+generate
+--------
+npx generate-odata-client -i service-specs -o generated --forceOverwrite
+
+
+srv/server.js
+-------------
+const express = require("express");
+const app = express();
+
+const { Candidate } = require("./generated/sfo-data-service");
+
+function getCandidates(req) {
+    return Candidate.requestBuilder()
+        .getAll()
+        .filter(Candidate.COUNTRY.equals('US'), Candidate.ZIP.notEquals(null))
+        .select(Candidate.FIRST_NAME, Candidate.LAST_NAME, Candidate.CITY, Candidate.ZIP)
+        .withCustomHeaders({
+            apikey: "<api-key>"
+        })
+        .execute({
+            url: "https://sandbox.api.sap.com/successfactors"
+        });
+};
+
+app.get("/", function (req, res) {
+    res.status(200).send('<html><head></head><body><a href="/srv/candidates">Candidates</a></body></html>');
+});
+
+app.get("/srv/candidates", function (req, res) {
+    getCandidates(req)
+        .then(candidates => {
+            res.status(200).json(candidates);
+        })
+        .catch(error => {
+            res.status(500).send(error.message);
+        });
+});
+
+const port = process.env.PORT || 3000;
+app.listen(port, function () {
+    console.info("Listening on http://localhost:" + port);
+});
+
+
+srv/.env
+--------
+destinations=[{"name": "sfapi", "url": "", "username": "user@company", "password": ""}]
+
+
+srv/server.js
+-------------
+			destinationName: "sfapi"
+
+
+create services
+---------------
+cf cs xsuaa application uaa
+cf cs destination lite dest
+
+
+srv/manifest.yml
+----------------
+applications:
+- name: sfsdksrv
+  random-route: true
+  memory: 256M
+  disk_quota: 256M
+  buildpacks:
+    - nodejs_buildpack
+  services:
+    - uaa
+    - dest
+  env:
+    apiDest: sfapi
+
+
+srv/server.js
+-------------
+			destinationName: process.env.apiDest
+
+
+srv
+---
+npm i --save @sap/xsenv @sap/xssec passport
+
+
+srv/server.js
+-------------
+
+const xsenv = require("@sap/xsenv");
+const xssec = require("@sap/xssec");
+const passport = require("passport");
+
+const services = xsenv.getServices({
+	uaa: { tag: "xsuaa" }
+});
+
+passport.use("JWT", new xssec.JWTStrategy(services.uaa));
+app.use(passport.initialize());
+app.use(passport.authenticate("JWT", {
+	session: false
+}));
+
+const { retrieveJwt } = require("@sap/cloud-sdk-core");
+
+...
+
+		.execute({
+			destinationName: process.env.apiDest,
+			jwt: retrieveJwt(req)
+		});
+
+...
+
+	if (req.authInfo.checkScope("uaa.user")) {
+
+	} else {
+		res.type("text/plain").status(403).send("Unauthorized");
+	}
+
+
+xs-security.json
+----------------
+{
+    "xsappname": "sfsdkapp",
+    "tenant-mode": "shared",
+    "scopes": [
+        {
+            "name": "uaa.user",
+            "description": "Token Exchange"
+        }
+    ],
+    "role-templates": [
+        {
+            "name": "TOKEN_EXCHANGE",
+            "scope-references": [
+                "uaa.user"
+            ]
+        }
+    ]
+}
+
+
+app/package.json
+----------------
+{
+	"dependencies": {
+		"@sap/approuter": "^6.5.1"
+	},
+	"scripts": {
+		"start": "node node_modules/@sap/approuter/approuter.js"
+	}
+}
+
+
+app/xs-app.json
+---------------
+{
+	"welcomeFile": "index.html",
+	"authenticationMethod": "route",
+	"routes": [
+		{
+			"source": "^/srv/(.*)$",
+			"authenticationType": "xsuaa",
+			"scope": "uaa.user",
+			"destination": "srv"
+		},
+		{
+			"source": "/(.*)",
+			"authenticationType": "xsuaa",
+			"scope": "uaa.user",
+			"localDir": "resources"
+		}
+	]
+}
+
+
+app/resources/index.html
+------------------------
+<!DOCTYPE HTML>
+<html>
+<head>
+    <title>Digital Partner Engineering</title>
+</head>
+<body>
+    <h1>Extension App for SAP SuccessFactors Recruiting</h1>
+    <a href="/srv/candidates">Candidates</a>
+</body>
+</html>
+
+
+/mta.yaml
+---------
+ID: sfsdkapp
+_schema-version: '2.1'
+version: 0.0.1
+
+modules:
+ - name: sfsdksrv
+   type: nodejs
+   path: srv
+   parameters:
+      memory: 256M
+   provides:
+    - name: srv_api
+      properties:
+         url: ${default-url}
+   requires:
+    - name: sfsdkuaa
+    - name: sfsdkdest
+    - name: sfsdkapi
+   properties:
+      apiDest: 'sfsdkapi'
+
+ - name: sfsdkapp
+   type: html5
+   path: app
+   parameters:
+      memory: 256M
+   requires:
+    - name: sfsdkuaa
+    - name: srv_api
+      group: destinations
+      properties:
+        name: srv
+        url: ~{url}
+        forwardAuthToken: true
+   properties:
+      TENANT_HOST_PATTERN: '^(.*)-dev-sfsdkapp.cfapps.(.*).hana.ondemand.com'
+
+resources:
+ - name: sfsdkuaa
+   type: org.cloudfoundry.managed-service
+   parameters:
+      path: ./xs-security.json
+      service-plan: application
+      service: xsuaa
+ - name: sfsdkdest
+   type: org.cloudfoundry.managed-service
+   parameters:
+      service-plan: lite
+      service: destination
+ - name: sfsdkapi
+   type: org.cloudfoundry.existing-service

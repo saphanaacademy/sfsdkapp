@@ -1,0 +1,51 @@
+ID: sfsdkapp
+_schema-version: '2.1'
+version: 0.0.1
+
+modules:
+ - name: sfsdksrv
+   type: nodejs
+   path: srv
+   parameters:
+      memory: 256M
+   provides:
+    - name: srv_api
+      properties:
+         url: ${default-url}
+   requires:
+    - name: sfsdkuaa
+    - name: sfsdkdest
+    - name: sfsdkapi
+   properties:
+      apiDest: 'sfsdkapi'
+
+ - name: sfsdkapp
+   type: html5
+   path: app
+   parameters:
+      memory: 256M
+   requires:
+    - name: sfsdkuaa
+    - name: srv_api
+      group: destinations
+      properties:
+        name: srv
+        url: ~{url}
+        forwardAuthToken: true
+   properties:
+      TENANT_HOST_PATTERN: '^(.*)-dev-sfsdkapp.cfapps.(.*).hana.ondemand.com'
+
+resources:
+ - name: sfsdkuaa
+   type: org.cloudfoundry.managed-service
+   parameters:
+      path: ./xs-security.json
+      service-plan: application
+      service: xsuaa
+ - name: sfsdkdest
+   type: org.cloudfoundry.managed-service
+   parameters:
+      service-plan: lite
+      service: destination
+ - name: sfsdkapi
+   type: org.cloudfoundry.existing-service
