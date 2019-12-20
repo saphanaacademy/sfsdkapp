@@ -1,6 +1,6 @@
 {
 	"engines": {
-		"node": ">=11.0.0"
+		"node": "<=10"
 	},
 	"dependencies": {
 		"@sap/cloud-sdk-core": "^1.12.0",
